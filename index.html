@@ -746,7 +746,7 @@ function populateDurationSelect(){
 // ---------- Backend config ----------
 // Pegá acá la URL que te da Google Apps Script al implementar como "Aplicación web".
 // Tiene esta forma: https://script.google.com/macros/s/AKfycb.../exec
-const AGENDA_SCRIPT_URL = 'PEGA_AQUI_LA_URL_DE_TU_APPS_SCRIPT';
+const AGENDA_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjOlYQbqy-dv2QuUSufE_P_eTkpG4JSJjr-XGVx7R04auHY3l0GhOLxlSwOt-28TjmSA/exec';
 
 function isBackendConfigured(){
   return typeof AGENDA_SCRIPT_URL === 'string' && AGENDA_SCRIPT_URL.indexOf('https://script.google.com') === 0;
