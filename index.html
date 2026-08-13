@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agenda de turnos</title>
+<script src="https://cdn.jsdelivr.net/npm/libphonenumber-js/bundle/libphonenumber-js.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
@@ -99,6 +100,45 @@ body{
 }
 .banner-retry:hover{background:var(--teal-deep);}
 
+/* ---------- Loading states ---------- */
+.spinner{
+  display:inline-block;
+  width:12px; height:12px;
+  border:2px solid rgba(0,0,0,.15);
+  border-top-color:var(--teal);
+  border-radius:50%;
+  animation:spin .7s linear infinite;
+  vertical-align:middle;
+}
+.spinner-lg{
+  width:28px; height:28px;
+  border-width:3px;
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+
+.sync-indicator{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-family:'DM Mono', monospace;
+  font-size:11px;
+  color:var(--ink-soft);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+
+.initial-loading{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  padding:80px 20px;
+  color:var(--ink-soft);
+  font-size:14px;
+}
+.initial-loading.hidden{display:none;}
+
 /* ---------- Layout ---------- */
 .layout{
   display:grid;
@@ -109,6 +149,19 @@ body{
 @media (max-width:760px){
   .layout{grid-template-columns:1fr;}
   .appt-row-bottom{padding-left:0;}
+  .app{padding:18px 14px 60px;}
+  .card{padding:16px;}
+  .masthead h1{font-size:26px;}
+  .appt-row-top{flex-wrap:wrap; row-gap:6px;}
+  .appt-name{min-width:140px;}
+  .week-timetable-wrap{-webkit-overflow-scrolling:touch;}
+}
+@media (max-width:480px){
+  .row2{grid-template-columns:1fr;}
+  .price-group select{width:80px;}
+  .masthead{flex-direction:column; align-items:flex-start;}
+  .tabs{overflow-x:auto; flex-wrap:nowrap;}
+  .tab{white-space:nowrap;}
 }
 
 /* ---------- Add form card ---------- */
@@ -163,6 +216,9 @@ body{
 }
 .field textarea{resize:vertical; min-height:50px;}
 .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.price-group{display:flex; gap:6px;}
+.price-group input{flex:1; min-width:0; font-size:15px;}
+.price-group select{width:78px; flex-shrink:0; padding-left:6px; padding-right:6px;}
 
 .btn-primary{
   width:100%;
@@ -480,13 +536,21 @@ body{
     <h1>Agenda de turnos</h1>
     <div style="display:flex; align-items:center; gap:12px;">
       <span class="today-tag" id="todayTag"></span>
+      <span id="syncIndicator" class="sync-indicator hidden">
+        <span class="spinner"></span> Sincronizando…
+      </span>
       <button id="btnRefresh" class="banner-retry" style="margin-left:0;">↻ Actualizar</button>
     </div>
   </div>
 
   <div id="statusBanner" class="status-banner hidden"></div>
 
-  <div class="layout">
+  <div id="initialLoading" class="initial-loading">
+    <span class="spinner spinner-lg"></span>
+    <span>Cargando la agenda…</span>
+  </div>
+
+  <div class="layout hidden" id="mainLayout">
     <!-- Sidebar: quick add -->
     <div>
       <div class="card">
@@ -509,18 +573,22 @@ body{
             <select id="fDuration"></select>
           </div>
         </div>
-        <div class="row2">
-          <div class="field">
-            <label for="fPhone">Teléfono (opcional)</label>
-            <input type="tel" id="fPhone" placeholder="11 5555-5555">
-          </div>
-          <div class="field">
-            <label for="fPrice">Valor consulta (opcional)</label>
+        <div class="field">
+          <label for="fPhone">Teléfono</label>
+          <input type="tel" id="fPhone" placeholder="11 5555-5555">
+        </div>
+        <div class="field">
+          <label for="fPrice">Valor consulta</label>
+          <div class="price-group">
+            <select id="fCurrency">
+              <option value="ARS" selected>$</option>
+              <option value="USD">US$</option>
+            </select>
             <input type="number" id="fPrice" placeholder="0" min="0" step="0.01">
           </div>
         </div>
         <div class="field">
-          <label for="fNotes">Notas (opcional)</label>
+          <label for="fNotes">Notas</label>
           <textarea id="fNotes" placeholder="Ej: primera sesión, modalidad online..."></textarea>
         </div>
         <button class="btn-primary" id="btnAdd">Agregar turno</button>
@@ -678,7 +746,7 @@ function populateDurationSelect(){
 // ---------- Backend config ----------
 // Pegá acá la URL que te da Google Apps Script al implementar como "Aplicación web".
 // Tiene esta forma: https://script.google.com/macros/s/AKfycb.../exec
-const AGENDA_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjOlYQbqy-dv2QuUSufE_P_eTkpG4JSJjr-XGVx7R04auHY3l0GhOLxlSwOt-28TjmSA/exec';
+const AGENDA_SCRIPT_URL = 'PEGA_AQUI_LA_URL_DE_TU_APPS_SCRIPT';
 
 function isBackendConfigured(){
   return typeof AGENDA_SCRIPT_URL === 'string' && AGENDA_SCRIPT_URL.indexOf('https://script.google.com') === 0;
@@ -714,20 +782,49 @@ function hideBanner(){
   document.getElementById('statusBanner').classList.add('hidden');
 }
 
+let hasLoadedOnce = false;
+
+function showInitialLoading(){
+  document.getElementById('initialLoading').classList.remove('hidden');
+  document.getElementById('mainLayout').classList.add('hidden');
+}
+function hideInitialLoading(){
+  document.getElementById('initialLoading').classList.add('hidden');
+  document.getElementById('mainLayout').classList.remove('hidden');
+}
+function setSyncing(isSyncing){
+  const indicator = document.getElementById('syncIndicator');
+  const btn = document.getElementById('btnRefresh');
+  if(isSyncing){
+    indicator.classList.remove('hidden');
+    btn.disabled = true;
+  } else {
+    indicator.classList.add('hidden');
+    btn.disabled = false;
+  }
+}
+
 async function loadAppointments(){
   if(!isBackendConfigured()){
+    hideInitialLoading();
     showBanner('setup', 'Todavía no conectaste la planilla: pegá la URL de tu Google Apps Script en <code>AGENDA_SCRIPT_URL</code>, dentro del archivo HTML, y volvé a abrir la página.');
     appointments = [];
     render();
     return;
   }
+
+  setSyncing(true);
   try{
     appointments = await apiList();
     hideBanner();
     render();
+    hasLoadedOnce = true;
   }catch(e){
     showBanner('error', 'No se pudo conectar con la planilla. Revisá tu conexión a internet. <button id="retryLoad" class="banner-retry">Reintentar</button>');
     document.getElementById('retryLoad').addEventListener('click', loadAppointments);
+  }finally{
+    setSyncing(false);
+    hideInitialLoading();
   }
 }
 
@@ -746,6 +843,7 @@ function editAppointment(id){
   document.getElementById('fNotes').value = a.notes || '';
   document.getElementById('fPhone').value = a.phone || '';
   document.getElementById('fPrice').value = a.price || '';
+  document.getElementById('fCurrency').value = a.currency || 'ARS';
   editingId = id;
   document.getElementById('btnAdd').textContent = 'Guardar cambios';
   window.scrollTo({top:0, behavior:'smooth'});
@@ -755,11 +853,37 @@ function sortByTime(list){
   return list.slice().sort((a,b) => a.timeStart.localeCompare(b.timeStart));
 }
 
+function currencySymbol(currency){
+  return currency === 'USD' ? 'US$' : '$';
+}
+
+// Formatea el teléfono para mostrarlo de forma consistente sin importar cómo
+// se haya tipeado (con +, espacios, guiones, paréntesis, etc.). Si el número
+// no empieza con "+", asumimos Argentina como país por defecto. Si no se
+// puede reconocer como un teléfono válido, se muestra tal cual se cargó.
+function formatPhoneDisplay(raw){
+  if(!raw) return '';
+  if(typeof libphonenumber === 'undefined') return raw; // la librería no cargó: mostramos el dato crudo
+  try{
+    const phoneNumber = libphonenumber.parsePhoneNumberFromString(raw, 'AR');
+    if(phoneNumber && phoneNumber.isValid()){
+      return phoneNumber.formatInternational();
+    }
+  }catch(e){ /* no es un teléfono reconocible, cae al valor original */ }
+  return raw;
+}
+
+function formatPrice(value){
+  const num = Number(value);
+  if(isNaN(num) || value === '' || value === null) return escapeHtml(String(value));
+  return num.toLocaleString('es-AR');
+}
+
 function apptRowHTML(a, isToday){
   const color = colorForName(a.name);
   const metaParts = [];
-  if(a.phone) metaParts.push(`<span class="appt-meta-item">📞 ${escapeHtml(a.phone)}</span>`);
-  if(a.price) metaParts.push(`<span class="appt-meta-item">$${escapeHtml(a.price)}</span>`);
+  if(a.phone) metaParts.push(`<span class="appt-meta-item">📞 ${escapeHtml(formatPhoneDisplay(a.phone))}</span>`);
+  if(a.price) metaParts.push(`<span class="appt-meta-item">${currencySymbol(a.currency)}${formatPrice(a.price)}</span>`);
   if(a.notes) metaParts.push(`<span class="appt-meta-item appt-meta-notes">${escapeHtml(a.notes)}</span>`);
 
   return `
@@ -792,6 +916,7 @@ async function addAppointment(){
   const duration = parseInt(document.getElementById('fDuration').value, 10);
   const phone = document.getElementById('fPhone').value.trim();
   const price = document.getElementById('fPrice').value.trim();
+  const currency = document.getElementById('fCurrency').value;
   const notes = document.getElementById('fNotes').value.trim();
   const msg = document.getElementById('formMsg');
 
@@ -812,17 +937,18 @@ async function addAppointment(){
 
   try{
     if(wasEditing){
-      await apiPost({ action:'update', appointment:{ id: wasEditing, name, date, timeStart, timeEnd, phone, price, notes } });
+      await apiPost({ action:'update', appointment:{ id: wasEditing, name, date, timeStart, timeEnd, phone, price, currency, notes } });
       editingId = null;
       btn.textContent = 'Agregar turno';
     } else {
-      await apiPost({ action:'create', appointment:{ name, date, timeStart, timeEnd, phone, price, notes } });
+      await apiPost({ action:'create', appointment:{ name, date, timeStart, timeEnd, phone, price, currency, notes } });
     }
     await loadAppointments();
 
     document.getElementById('fName').value = '';
     document.getElementById('fPhone').value = '';
     document.getElementById('fPrice').value = '';
+    document.getElementById('fCurrency').value = 'ARS';
     document.getElementById('fNotes').value = '';
     document.getElementById('fDuration').value = DEFAULT_DURATION;
 
@@ -970,8 +1096,8 @@ function renderSemana(){
       const leftPct = col * colWidthPct;
       const hasOverlap = colsInCluster > 1;
       const tooltipParts = [`${a.timeStart}–${a.timeEnd}`, a.name];
-      if(a.phone) tooltipParts.push(`Tel: ${a.phone}`);
-      if(a.price) tooltipParts.push(`$${a.price}`);
+      if(a.phone) tooltipParts.push(`Tel: ${formatPhoneDisplay(a.phone)}`);
+      if(a.price) tooltipParts.push(`${currencySymbol(a.currency)}${formatPrice(a.price)}`);
       const tooltip = tooltipParts.join(' · ');
       blocksHtml += `
         <div class="tt-appt ${isToday ? 'is-today' : ''} ${hasOverlap ? 'tt-overlap' : ''}"
