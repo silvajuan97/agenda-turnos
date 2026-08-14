@@ -398,6 +398,33 @@ body{
   color:var(--ink-soft);
 }
 
+.day-nav{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:16px;
+}
+.day-nav button{
+  background:var(--paper-raised);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:6px 12px;
+  cursor:pointer;
+  font-family:'Inter',sans-serif;
+  font-weight:600;
+  font-size:14px;
+}
+.day-nav button:hover{border-color:var(--teal);}
+.day-nav input[type="date"]{
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:7px 10px;
+  font-family:'DM Mono', monospace;
+  font-size:13px;
+  background:var(--paper-raised);
+  color:var(--ink);
+}
+
 /* ---------- Week view: hourly timetable ---------- */
 .week-timetable-wrap{
   overflow-x:auto;
@@ -525,6 +552,72 @@ body{
   font-style:italic;
 }
 
+/* ---------- Estadísticas ---------- */
+.stats-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  gap:12px;
+}
+.stats-grid-compact{
+  grid-template-columns:repeat(auto-fit, minmax(120px, 1fr));
+}
+.stat-card{
+  background:var(--paper-raised);
+  border:1px solid var(--line);
+  border-top:3px solid var(--teal);
+  border-radius:8px;
+  padding:14px 16px;
+}
+.stat-value{
+  font-family:'Fraunces', serif;
+  font-weight:600;
+  font-size:24px;
+  line-height:1.1;
+}
+.stat-label{
+  font-size:11.5px;
+  color:var(--ink-soft);
+  margin-top:4px;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+.wd-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:8px;
+}
+.wd-label{
+  font-family:'DM Mono', monospace;
+  font-size:11px;
+  text-transform:uppercase;
+  color:var(--ink-soft);
+  width:32px;
+  flex-shrink:0;
+}
+.wd-bar-track{
+  flex:1;
+  background:var(--paper);
+  border-radius:5px;
+  height:16px;
+  overflow:hidden;
+}
+.wd-bar-fill{
+  height:100%;
+  background:var(--teal);
+  border-radius:5px;
+  min-width:2px;
+}
+.wd-count{
+  font-family:'DM Mono', monospace;
+  font-size:12px;
+  color:var(--ink-soft);
+  width:20px;
+  text-align:right;
+  flex-shrink:0;
+}
+
 /* ---------- misc ---------- */
 .hidden{display:none !important;}
 </style>
@@ -601,12 +694,22 @@ body{
       <div class="tabs">
         <button class="tab active" data-view="hoy">Hoy</button>
         <button class="tab" data-view="manana">Mañana</button>
+        <button class="tab" data-view="otro">Otro día</button>
         <button class="tab" data-view="semana">Semana</button>
+        <button class="tab" data-view="estadisticas">Estadísticas</button>
       </div>
 
-      <div id="viewHoy"></div>
-      <div id="viewManana" class="hidden"></div>
-      <div id="viewSemana" class="hidden">
+      <div id="viewHoy" class="view-panel"></div>
+      <div id="viewManana" class="view-panel hidden"></div>
+      <div id="viewOtro" class="view-panel hidden">
+        <div class="day-nav">
+          <button id="otroPrev">&larr;</button>
+          <input type="date" id="otroDatePicker">
+          <button id="otroNext">&rarr;</button>
+        </div>
+        <div id="otroContent"></div>
+      </div>
+      <div id="viewSemana" class="view-panel hidden">
         <div class="week-nav">
           <button id="weekPrev">&larr; anterior</button>
           <span class="week-range" id="weekRange"></span>
@@ -616,6 +719,14 @@ body{
         <div class="week-timetable-wrap">
           <div class="week-timetable" id="weekTimetable"></div>
         </div>
+      </div>
+      <div id="viewEstadisticas" class="view-panel hidden">
+        <div class="week-nav">
+          <button id="statsPrev">&larr; anterior</button>
+          <span class="week-range" id="statsMonthLabel"></span>
+          <button id="statsNext">siguiente &rarr;</button>
+        </div>
+        <div id="statsContent"></div>
       </div>
     </div>
   </div>
@@ -985,37 +1096,138 @@ function escapeHtml(str){
   return d.innerHTML;
 }
 
-function renderHoy(){
-  const t = todayStr();
-  const list = markOverlaps(sortByTime(appointments.filter(a => a.date === t)));
-  const d = new Date();
-  const html = `
+// Genera el bloque de agenda (encabezado + lista de turnos) para cualquier fecha,
+// reutilizado por Hoy, Mañana y Otro día.
+function dayBlockHTML(dateStr, emptyMsg){
+  const d = parseLocalDate(dateStr);
+  const isToday = dateStr === todayStr();
+  const list = markOverlaps(sortByTime(appointments.filter(a => a.date === dateStr)));
+  return `
     <div class="day-block">
       <div class="day-block-header">
         <span class="day-name">${DIAS[d.getDay()]}</span>
-        <span class="day-date">${d.getDate()} de ${MESES[d.getMonth()]}</span>
+        <span class="day-date">${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}</span>
         <span class="day-count">${list.length} turno${list.length!==1?'s':''}</span>
       </div>
-      ${list.length ? list.map(a => apptRowHTML(a, true)).join('') : '<div class="empty-state">No hay turnos cargados para hoy.</div>'}
+      ${list.length ? list.map(a => apptRowHTML(a, isToday)).join('') : `<div class="empty-state">${emptyMsg}</div>`}
     </div>`;
-  document.getElementById('viewHoy').innerHTML = html;
+}
+
+let statsMonthOffset = 0; // 0 = current month
+
+function getStatsMonthDate(){
+  const base = new Date();
+  base.setDate(1); // evita desbordes al sumar/restar meses
+  base.setMonth(base.getMonth() + statsMonthOffset);
+  return base;
+}
+
+function computeStatsForMonth(year, month0){
+  const monthAppts = appointments.filter(a => {
+    const d = parseLocalDate(a.date);
+    return d.getFullYear() === year && d.getMonth() === month0;
+  });
+
+  const uniquePatients = new Set(monthAppts.map(a => a.name.trim().toLowerCase())).size;
+
+  const priced = c => monthAppts.filter(a => (a.currency || 'ARS') === c && a.price !== '' && a.price != null && !isNaN(Number(a.price)));
+  const arsAppts = priced('ARS');
+  const usdAppts = priced('USD');
+  const sum = list => list.reduce((s,a) => s + Number(a.price), 0);
+  const arsTotal = sum(arsAppts);
+  const usdTotal = sum(usdAppts);
+
+  const byWeekday = [0,0,0,0,0,0,0]; // índice según DIAS: 0=domingo … 6=sábado
+  monthAppts.forEach(a => { byWeekday[parseLocalDate(a.date).getDay()]++; });
+
+  return {
+    totalTurnos: monthAppts.length,
+    uniquePatients,
+    arsTotal, usdTotal,
+    arsCount: arsAppts.length, usdCount: usdAppts.length,
+    arsAvg: arsAppts.length ? arsTotal / arsAppts.length : 0,
+    usdAvg: usdAppts.length ? usdTotal / usdAppts.length : 0,
+    byWeekday
+  };
+}
+
+function computeAllTimeStats(){
+  const uniquePatients = new Set(appointments.map(a => a.name.trim().toLowerCase())).size;
+  const priced = c => appointments.filter(a => (a.currency || 'ARS') === c && a.price !== '' && a.price != null && !isNaN(Number(a.price)));
+  const arsTotal = priced('ARS').reduce((s,a) => s + Number(a.price), 0);
+  const usdTotal = priced('USD').reduce((s,a) => s + Number(a.price), 0);
+  return { totalTurnos: appointments.length, uniquePatients, arsTotal, usdTotal };
+}
+
+function statCardHTML(label, value, accent){
+  return `
+    <div class="stat-card" ${accent ? `style="border-top-color:${accent}"` : ''}>
+      <div class="stat-value">${value}</div>
+      <div class="stat-label">${label}</div>
+    </div>`;
+}
+
+function renderEstadisticas(){
+  const monthDate = getStatsMonthDate();
+  const year = monthDate.getFullYear();
+  const month0 = monthDate.getMonth();
+  document.getElementById('statsMonthLabel').textContent =
+    `${MESES[month0].charAt(0).toUpperCase() + MESES[month0].slice(1)} ${year}`;
+
+  const s = computeStatsForMonth(year, month0);
+  const all = computeAllTimeStats();
+
+  const maxWeekday = Math.max(1, ...s.byWeekday);
+  const weekdayOrder = [1,2,3,4,5,6,0]; // arranca en lunes
+  const weekdayRows = weekdayOrder.map(i => `
+    <div class="wd-row">
+      <span class="wd-label">${DIAS_CORTOS[i]}</span>
+      <div class="wd-bar-track"><div class="wd-bar-fill" style="width:${(s.byWeekday[i]/maxWeekday*100).toFixed(0)}%"></div></div>
+      <span class="wd-count">${s.byWeekday[i]}</span>
+    </div>`).join('');
+
+  document.getElementById('statsContent').innerHTML = `
+    <div class="stats-grid">
+      ${statCardHTML('Turnos este mes', s.totalTurnos)}
+      ${statCardHTML('Pacientes distintos', s.uniquePatients)}
+      ${statCardHTML('Facturado en $', s.arsCount ? '$' + formatPrice(Math.round(s.arsTotal)) : '—', '#3F6357')}
+      ${statCardHTML('Facturado en US$', s.usdCount ? 'US$' + formatPrice(Math.round(s.usdTotal)) : '—', '#4C7A94')}
+      ${statCardHTML('Ticket promedio $', s.arsCount ? '$' + formatPrice(Math.round(s.arsAvg)) : '—')}
+      ${statCardHTML('Ticket promedio US$', s.usdCount ? 'US$' + formatPrice(s.usdAvg.toFixed(2)) : '—')}
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h2>Turnos por día de la semana</h2>
+      ${weekdayRows}
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Histórico total</h2>
+      <div class="stats-grid stats-grid-compact">
+        ${statCardHTML('Turnos cargados', all.totalTurnos)}
+        ${statCardHTML('Pacientes distintos', all.uniquePatients)}
+        ${statCardHTML('Total en $', all.arsTotal ? '$' + formatPrice(Math.round(all.arsTotal)) : '—')}
+        ${statCardHTML('Total en US$', all.usdTotal ? 'US$' + formatPrice(Math.round(all.usdTotal)) : '—')}
+      </div>
+    </div>`;
+}
+
+
+function renderHoy(){
+  document.getElementById('viewHoy').innerHTML = dayBlockHTML(todayStr(), 'No hay turnos cargados para hoy.');
 }
 
 function renderManana(){
   const d = new Date();
   d.setDate(d.getDate()+1);
-  const dStr = toDateStr(d);
-  const list = markOverlaps(sortByTime(appointments.filter(a => a.date === dStr)));
-  const html = `
-    <div class="day-block">
-      <div class="day-block-header">
-        <span class="day-name">${DIAS[d.getDay()]}</span>
-        <span class="day-date">${d.getDate()} de ${MESES[d.getMonth()]}</span>
-        <span class="day-count">${list.length} turno${list.length!==1?'s':''}</span>
-      </div>
-      ${list.length ? list.map(a => apptRowHTML(a, false)).join('') : '<div class="empty-state">No hay turnos cargados para mañana.</div>'}
-    </div>`;
-  document.getElementById('viewManana').innerHTML = html;
+  document.getElementById('viewManana').innerHTML = dayBlockHTML(toDateStr(d), 'No hay turnos cargados para mañana.');
+}
+
+let otroDiaDate = todayStr();
+
+function renderOtroDia(){
+  document.getElementById('otroDatePicker').value = otroDiaDate;
+  document.getElementById('otroContent').innerHTML = dayBlockHTML(otroDiaDate, 'No hay turnos cargados para este día.');
 }
 
 function getMondayOfWeek(offset){
@@ -1146,26 +1358,51 @@ function handleSlotClick(e, dateStr){
 function render(){
   renderHoy();
   renderManana();
+  renderOtroDia();
   renderSemana();
+  renderEstadisticas();
   const d = new Date();
   document.getElementById('todayTag').textContent =
     `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]}`;
 }
 
 // tabs
+const VIEW_IDS = {
+  hoy: 'viewHoy',
+  manana: 'viewManana',
+  otro: 'viewOtro',
+  semana: 'viewSemana',
+  estadisticas: 'viewEstadisticas'
+};
+
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById('viewHoy').classList.add('hidden');
-    document.getElementById('viewManana').classList.add('hidden');
-    document.getElementById('viewSemana').classList.add('hidden');
-    document.getElementById('view' + btn.dataset.view.charAt(0).toUpperCase() + btn.dataset.view.slice(1)).classList.remove('hidden');
+    document.querySelectorAll('.view-panel').forEach(v => v.classList.add('hidden'));
+    document.getElementById(VIEW_IDS[btn.dataset.view]).classList.remove('hidden');
   });
 });
 
 document.getElementById('weekPrev').addEventListener('click', () => { weekOffset--; renderSemana(); });
 document.getElementById('weekNext').addEventListener('click', () => { weekOffset++; renderSemana(); });
+document.getElementById('otroPrev').addEventListener('click', () => {
+  const d = parseLocalDate(otroDiaDate);
+  d.setDate(d.getDate()-1);
+  otroDiaDate = toDateStr(d);
+  renderOtroDia();
+});
+document.getElementById('otroNext').addEventListener('click', () => {
+  const d = parseLocalDate(otroDiaDate);
+  d.setDate(d.getDate()+1);
+  otroDiaDate = toDateStr(d);
+  renderOtroDia();
+});
+document.getElementById('otroDatePicker').addEventListener('change', (e) => {
+  if(e.target.value){ otroDiaDate = e.target.value; renderOtroDia(); }
+});
+document.getElementById('statsPrev').addEventListener('click', () => { statsMonthOffset--; renderEstadisticas(); });
+document.getElementById('statsNext').addEventListener('click', () => { statsMonthOffset++; renderEstadisticas(); });
 document.getElementById('btnAdd').addEventListener('click', addAppointment);
 document.getElementById('btnRefresh').addEventListener('click', loadAppointments);
 document.getElementById('fDate').value = todayStr();
