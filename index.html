@@ -552,6 +552,36 @@ body{
   font-style:italic;
 }
 
+.week-totals{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-bottom:12px;
+}
+.week-total-chip{
+  background:var(--paper-raised);
+  border:1px solid var(--line);
+  border-left:3px solid var(--teal);
+  border-radius:7px;
+  padding:8px 14px;
+  font-size:13px;
+  display:flex;
+  align-items:baseline;
+  gap:6px;
+}
+.week-total-chip .amount{
+  font-family:'Fraunces', serif;
+  font-weight:600;
+  font-size:16px;
+}
+.week-total-chip .label{
+  font-family:'DM Mono', monospace;
+  font-size:10.5px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:var(--ink-soft);
+}
+
 /* ---------- Estadísticas ---------- */
 .stats-grid{
   display:grid;
@@ -715,6 +745,7 @@ body{
           <span class="week-range" id="weekRange"></span>
           <button id="weekNext">siguiente &rarr;</button>
         </div>
+        <div id="weekTotals" class="week-totals"></div>
         <p class="week-hint">Tocá un espacio libre en la grilla para cargar un turno en ese horario.</p>
         <div class="week-timetable-wrap">
           <div class="week-timetable" id="weekTimetable"></div>
@@ -863,11 +894,32 @@ function isBackendConfigured(){
   return typeof AGENDA_SCRIPT_URL === 'string' && AGENDA_SCRIPT_URL.indexOf('https://script.google.com') === 0;
 }
 
+// Google Sheets a veces auto-convierte celdas que "parecen" números o fechas
+// (por ejemplo, un nombre cargado como puro número de teléfono) a un tipo
+// Number/Date real, en vez de dejarlas como texto. Si eso llega crudo hasta acá,
+// operaciones como .trim() sobre un Number rompen todo el renderizado de la
+// vista. Por eso normalizamos todo a texto apenas llega de la planilla.
+function normalizeAppointment(a){
+  const toText = (v) => (v === null || v === undefined) ? '' : String(v).trim();
+  return {
+    ...a,
+    id: toText(a.id),
+    name: toText(a.name),
+    date: toText(a.date),
+    timeStart: toText(a.timeStart),
+    timeEnd: toText(a.timeEnd),
+    phone: toText(a.phone),
+    price: toText(a.price),
+    currency: toText(a.currency) || 'ARS',
+    notes: toText(a.notes)
+  };
+}
+
 async function apiList(){
   const res = await fetch(`${AGENDA_SCRIPT_URL}?action=list`);
   if(!res.ok) throw new Error('network');
   const data = await res.json();
-  return data.appointments || [];
+  return (data.appointments || []).map(normalizeAppointment);
 }
 
 // Usamos text/plain como Content-Type a propósito: evita que el navegador dispare
@@ -960,8 +1012,14 @@ function editAppointment(id){
   window.scrollTo({top:0, behavior:'smooth'});
 }
 
+function timeToMinutesSafe(t){
+  const str = (typeof t === 'string') ? t : String(t || '00:00');
+  const [h, m] = str.split(':');
+  return (parseInt(h, 10) || 0) * 60 + (parseInt(m, 10) || 0);
+}
+
 function sortByTime(list){
-  return list.slice().sort((a,b) => a.timeStart.localeCompare(b.timeStart));
+  return list.slice().sort((a,b) => timeToMinutesSafe(a.timeStart) - timeToMinutesSafe(b.timeStart));
 }
 
 function currencySymbol(currency){
@@ -1249,6 +1307,28 @@ function timeToMinutesFromStart(timeStr){
   return (h*60+m) - START_HOUR*60;
 }
 
+function renderWeekTotals(dayDates){
+  let ars = 0, usd = 0, arsCount = 0, usdCount = 0;
+  dayDates.forEach(dStr => {
+    appointments.filter(a => a.date === dStr).forEach(a => {
+      if(a.price === '' || a.price === null || a.price === undefined) return;
+      const val = Number(a.price);
+      if(isNaN(val)) return;
+      if((a.currency || 'ARS') === 'USD'){ usd += val; usdCount++; }
+      else { ars += val; arsCount++; }
+    });
+  });
+
+  const chips = [];
+  if(arsCount || usdCount){
+    if(arsCount) chips.push(`<div class="week-total-chip"><span class="amount">$${formatPrice(ars.toFixed(2))}</span><span class="label">ingresos en $</span></div>`);
+    if(usdCount) chips.push(`<div class="week-total-chip"><span class="amount">US$${formatPrice(usd.toFixed(2))}</span><span class="label">ingresos en US$</span></div>`);
+  } else {
+    chips.push(`<div class="week-total-chip"><span class="amount">—</span><span class="label">sin ingresos cargados esta semana</span></div>`);
+  }
+  document.getElementById('weekTotals').innerHTML = chips.join('');
+}
+
 function renderSemana(){
   const monday = getMondayOfWeek(weekOffset);
   const sunday = new Date(monday);
@@ -1284,6 +1364,8 @@ function renderSemana(){
     html += `<div class="tt-hour-label" style="top:${(h-START_HOUR)*ROW_H}px">${pad(h)}:00</div>`;
   }
   html += `</div>`;
+
+  renderWeekTotals(dayDates);
 
   // day columns
   const now = new Date();
