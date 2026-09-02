@@ -243,41 +243,6 @@ body{
   min-height:14px;
 }
 
-/* ---------- Patient autocomplete (Nuevo turno form) ---------- */
-.patient-suggestions{
-  position:absolute;
-  left:0; right:0; top:100%;
-  background:var(--paper-raised);
-  border:1px solid var(--line);
-  border-radius:6px;
-  margin-top:2px;
-  max-height:190px;
-  overflow-y:auto;
-  z-index:10;
-  box-shadow:0 4px 14px rgba(0,0,0,.10);
-}
-.patient-suggestion-item{
-  padding:8px 10px;
-  font-size:13.5px;
-  cursor:pointer;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:8px;
-}
-.patient-suggestion-item:hover{background:var(--paper);}
-.patient-suggestion-item .psi-phone{
-  font-family:'DM Mono', monospace;
-  font-size:11px;
-  color:var(--ink-soft);
-  white-space:nowrap;
-}
-.patient-phone-info{
-  font-size:12px;
-  color:var(--ink-soft);
-  margin-top:6px;
-}
-
 /* ---------- Nav tabs ---------- */
 .tabs{
   display:flex;
@@ -683,41 +648,6 @@ body{
   flex-shrink:0;
 }
 
-/* ---------- Pacientes ---------- */
-.patient-list-row{
-  display:flex;
-  align-items:center;
-  gap:12px;
-  background:var(--paper-raised);
-  border:1px solid var(--line);
-  border-radius:8px;
-  padding:12px 14px;
-  margin-bottom:8px;
-  cursor:pointer;
-}
-.patient-list-row:hover{border-color:var(--teal);}
-.patient-list-main{flex:1; min-width:0;}
-.patient-list-name{font-weight:600; font-size:14.5px;}
-.patient-list-sub{font-size:12px; color:var(--ink-soft); margin-top:2px;}
-.patient-list-phone{
-  font-family:'DM Mono', monospace;
-  font-size:12px;
-  color:var(--ink-soft);
-  white-space:nowrap;
-}
-.patient-session-row{
-  display:flex;
-  align-items:center;
-  gap:12px;
-  padding:8px 4px;
-  border-bottom:1px solid var(--line);
-  font-size:13px;
-}
-.patient-session-row:last-child{border-bottom:none;}
-.ps-date{font-family:'DM Mono', monospace; min-width:56px; color:var(--ink-soft);}
-.ps-time{font-family:'DM Mono', monospace; min-width:96px;}
-.ps-price{flex:1; text-align:right; padding-right:8px;}
-
 /* ---------- misc ---------- */
 .hidden{display:none !important;}
 </style>
@@ -748,11 +678,9 @@ body{
     <div>
       <div class="card">
         <h2>Nuevo turno</h2>
-        <div class="field" style="position:relative;">
+        <div class="field">
           <label for="fName">Paciente</label>
-          <input type="text" id="fName" placeholder="Nombre y apellido" autocomplete="off">
-          <div id="patientSuggestions" class="patient-suggestions hidden"></div>
-          <div id="patientPhoneInfo" class="patient-phone-info hidden"></div>
+          <input type="text" id="fName" placeholder="Nombre y apellido">
         </div>
         <div class="field">
           <label for="fDate">Día</label>
@@ -767,6 +695,10 @@ body{
             <label for="fDuration">Duración</label>
             <select id="fDuration"></select>
           </div>
+        </div>
+        <div class="field">
+          <label for="fPhone">Teléfono</label>
+          <input type="tel" id="fPhone" placeholder="11 5555-5555">
         </div>
         <div class="field">
           <label for="fPrice">Valor consulta</label>
@@ -794,7 +726,6 @@ body{
         <button class="tab" data-view="manana">Mañana</button>
         <button class="tab" data-view="otro">Otro día</button>
         <button class="tab" data-view="semana">Semana</button>
-        <button class="tab" data-view="pacientes">Pacientes</button>
         <button class="tab" data-view="estadisticas">Estadísticas</button>
       </div>
 
@@ -828,30 +759,21 @@ body{
         </div>
         <div id="statsContent"></div>
       </div>
-      <div id="viewPacientes" class="view-panel hidden">
-        <div id="patientSearchWrap" class="field" style="max-width:320px;">
-          <input type="text" id="patientSearch" placeholder="Buscar paciente...">
-        </div>
-        <div id="patientsListContainer"></div>
-      </div>
     </div>
   </div>
 </div>
 
 <script>
 let appointments = [];
-let patients = [];
 let weekOffset = 0; // 0 = current week
 let editingId = null;
-let selectedPatientId = null; // paciente enlazado al turno que se está cargando/editando
 
 const DIAS = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
 const DIAS_CORTOS = ['dom','lun','mar','mié','jue','vie','sáb'];
 const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
 // Palette of distinct, muted colors. Each patient gets a consistent color
-// (derived from su id, o del nombre normalizado si todavía no está enlazado)
-// para que se lea igual en todas las vistas.
+// (derived from their name) so the same person reads the same color across views.
 const PALETTE = [
   { bg:'#3F6357', line:'#2C4740' }, // teal
   { bg:'#C1704F', line:'#96482E' }, // clay
@@ -867,17 +789,8 @@ function hashStr(str){
   for(let i=0; i<str.length; i++){ h = (h*31 + str.charCodeAt(i)) >>> 0; }
   return h;
 }
-
-// Quita tildes, pasa a minúscula y colapsa espacios, para poder comparar
-// nombres escritos de formas distintas como si fueran la misma persona.
-function normalizeName(str){
-  return (str || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function colorForAppointment(a){
-  const key = (a && a.patientId) ? a.patientId : normalizeName(a && a.name);
+function colorForName(name){
+  const key = (name || '').trim().toLowerCase();
   const idx = hashStr(key) % PALETTE.length;
   return PALETTE[idx];
 }
@@ -991,38 +904,15 @@ function normalizeAppointment(a){
   return {
     ...a,
     id: toText(a.id),
-    patientId: toText(a.patientId),
     name: toText(a.name),
     date: toText(a.date),
     timeStart: toText(a.timeStart),
     timeEnd: toText(a.timeEnd),
+    phone: toText(a.phone),
     price: toText(a.price),
     currency: toText(a.currency) || 'ARS',
     notes: toText(a.notes)
   };
-}
-
-function normalizePatient(p){
-  const toText = (v) => (v === null || v === undefined) ? '' : String(v).trim();
-  return {
-    id: toText(p.id),
-    name: toText(p.name),
-    phone: toText(p.phone),
-    notes: toText(p.notes)
-  };
-}
-
-function getPatientById(id){
-  return patients.find(p => p.id === id) || null;
-}
-function findPatientByExactName(name){
-  const key = normalizeName(name);
-  if(!key) return null;
-  return patients.find(p => normalizeName(p.name) === key) || null;
-}
-function getPatientPhone(a){
-  const p = a.patientId ? getPatientById(a.patientId) : null;
-  return p ? p.phone : '';
 }
 
 async function apiList(){
@@ -1030,13 +920,6 @@ async function apiList(){
   if(!res.ok) throw new Error('network');
   const data = await res.json();
   return (data.appointments || []).map(normalizeAppointment);
-}
-
-async function apiListPatients(){
-  const res = await fetch(`${AGENDA_SCRIPT_URL}?action=listPatients`);
-  if(!res.ok) throw new Error('network');
-  const data = await res.json();
-  return (data.patients || []).map(normalizePatient);
 }
 
 // Usamos text/plain como Content-Type a propósito: evita que el navegador dispare
@@ -1089,16 +972,13 @@ async function loadAppointments(){
     hideInitialLoading();
     showBanner('setup', 'Todavía no conectaste la planilla: pegá la URL de tu Google Apps Script en <code>AGENDA_SCRIPT_URL</code>, dentro del archivo HTML, y volvé a abrir la página.');
     appointments = [];
-    patients = [];
     render();
     return;
   }
 
   setSyncing(true);
   try{
-    const [appts, pats] = await Promise.all([apiList(), apiListPatients()]);
-    appointments = appts;
-    patients = pats;
+    appointments = await apiList();
     hideBanner();
     render();
     hasLoadedOnce = true;
@@ -1124,87 +1004,12 @@ function editAppointment(id){
   document.getElementById('fDuration').value = duration;
 
   document.getElementById('fNotes').value = a.notes || '';
+  document.getElementById('fPhone').value = a.phone || '';
   document.getElementById('fPrice').value = a.price || '';
   document.getElementById('fCurrency').value = a.currency || 'ARS';
-
-  selectedPatientId = a.patientId || null;
-  hidePatientSuggestions();
-  showSelectedPatientPhone(selectedPatientId ? getPatientById(selectedPatientId) : null);
-
   editingId = id;
   document.getElementById('btnAdd').textContent = 'Guardar cambios';
   window.scrollTo({top:0, behavior:'smooth'});
-}
-
-// ---------- Autocompletado de pacientes en "Nuevo turno" ----------
-
-function showPatientSuggestions(query){
-  const box = document.getElementById('patientSuggestions');
-  const key = normalizeName(query);
-  if(!key){ box.classList.add('hidden'); box.innerHTML = ''; return; }
-  const matches = patients.filter(p => normalizeName(p.name).includes(key)).slice(0, 6);
-  if(!matches.length){ box.classList.add('hidden'); box.innerHTML = ''; return; }
-  box.innerHTML = matches.map(p => `
-    <div class="patient-suggestion-item" data-id="${p.id}">
-      <span>${escapeHtml(p.name)}</span>
-      ${p.phone ? `<span class="psi-phone">${escapeHtml(formatPhoneDisplay(p.phone))}</span>` : ''}
-    </div>`).join('');
-  box.classList.remove('hidden');
-  box.querySelectorAll('.patient-suggestion-item').forEach(el => {
-    el.addEventListener('mousedown', (e) => { e.preventDefault(); selectPatient(el.dataset.id); });
-  });
-}
-
-function hidePatientSuggestions(){
-  const box = document.getElementById('patientSuggestions');
-  box.classList.add('hidden');
-  box.innerHTML = '';
-}
-
-function selectPatient(id){
-  const p = getPatientById(id);
-  if(!p) return;
-  selectedPatientId = p.id;
-  document.getElementById('fName').value = p.name;
-  hidePatientSuggestions();
-  showSelectedPatientPhone(p);
-}
-
-function showSelectedPatientPhone(p){
-  const info = document.getElementById('patientPhoneInfo');
-  if(p && p.phone){
-    info.textContent = `📞 ${formatPhoneDisplay(p.phone)}`;
-    info.classList.remove('hidden');
-  } else if(p){
-    info.textContent = 'Paciente sin teléfono guardado.';
-    info.classList.remove('hidden');
-  } else {
-    info.classList.add('hidden');
-    info.textContent = '';
-  }
-}
-
-// Resuelve a qué paciente queda enlazado el turno que se está guardando:
-// 1) si ya hay uno seleccionado por autocompletado o edición, se usa ese;
-// 2) si el texto tipeado coincide exactamente con un paciente existente, se enlaza solo;
-// 3) si no coincide con nadie, se confirma antes de crear un paciente nuevo.
-async function resolvePatientForSave(typedName){
-  if(selectedPatientId){
-    const p = getPatientById(selectedPatientId);
-    if(p) return p.id;
-  }
-  const exact = findPatientByExactName(typedName);
-  if(exact) return exact.id;
-
-  const confirmNew = confirm(`No encontramos a "${typedName}" entre tus pacientes.\n¿Confirmás que es un paciente nuevo?`);
-  if(!confirmNew) return null;
-
-  const phone = prompt('Teléfono del paciente (opcional):', '') || '';
-  const res = await apiPost({ action:'createPatient', patient:{ name: typedName, phone, notes:'' } });
-  if(res && res.success){
-    return res.id;
-  }
-  throw new Error('No se pudo crear el paciente');
 }
 
 function timeToMinutesSafe(t){
@@ -1244,10 +1049,9 @@ function formatPrice(value){
 }
 
 function apptRowHTML(a, isToday){
-  const color = colorForAppointment(a);
-  const phone = getPatientPhone(a);
+  const color = colorForName(a.name);
   const metaParts = [];
-  if(phone) metaParts.push(`<span class="appt-meta-item">📞 ${escapeHtml(formatPhoneDisplay(phone))}</span>`);
+  if(a.phone) metaParts.push(`<span class="appt-meta-item">📞 ${escapeHtml(formatPhoneDisplay(a.phone))}</span>`);
   if(a.price) metaParts.push(`<span class="appt-meta-item">${currencySymbol(a.currency)}${formatPrice(a.price)}</span>`);
   if(a.notes) metaParts.push(`<span class="appt-meta-item appt-meta-notes">${escapeHtml(a.notes)}</span>`);
 
@@ -1279,6 +1083,7 @@ async function addAppointment(){
   const date = document.getElementById('fDate').value;
   const timeStart = document.getElementById('fStart').value;
   const duration = parseInt(document.getElementById('fDuration').value, 10);
+  const phone = document.getElementById('fPhone').value.trim();
   const price = document.getElementById('fPrice').value.trim();
   const currency = document.getElementById('fCurrency').value;
   const notes = document.getElementById('fNotes').value.trim();
@@ -1300,31 +1105,21 @@ async function addAppointment(){
   msg.textContent = 'Guardando...';
 
   try{
-    const patientId = await resolvePatientForSave(name);
-    if(patientId === null){
-      // el usuario canceló la creación del paciente nuevo: no guardamos nada
-      msg.textContent = '';
-      btn.disabled = false;
-      return;
-    }
-
     if(wasEditing){
-      await apiPost({ action:'update', appointment:{ id: wasEditing, patientId, name, date, timeStart, timeEnd, price, currency, notes } });
+      await apiPost({ action:'update', appointment:{ id: wasEditing, name, date, timeStart, timeEnd, phone, price, currency, notes } });
       editingId = null;
       btn.textContent = 'Agregar turno';
     } else {
-      await apiPost({ action:'create', appointment:{ patientId, name, date, timeStart, timeEnd, price, currency, notes } });
+      await apiPost({ action:'create', appointment:{ name, date, timeStart, timeEnd, phone, price, currency, notes } });
     }
     await loadAppointments();
 
     document.getElementById('fName').value = '';
+    document.getElementById('fPhone').value = '';
     document.getElementById('fPrice').value = '';
     document.getElementById('fCurrency').value = 'ARS';
     document.getElementById('fNotes').value = '';
     document.getElementById('fDuration').value = DEFAULT_DURATION;
-    selectedPatientId = null;
-    hidePatientSuggestions();
-    showSelectedPatientPhone(null);
 
     if(overlaps.length){
       const names = overlaps.map(o => `${o.name} (${o.timeStart}–${o.timeEnd})`).join(', ');
@@ -1391,7 +1186,7 @@ function computeStatsForMonth(year, month0){
     return d.getFullYear() === year && d.getMonth() === month0;
   });
 
-  const uniquePatients = new Set(monthAppts.map(a => a.patientId || normalizeName(a.name))).size;
+  const uniquePatients = new Set(monthAppts.map(a => a.name.trim().toLowerCase())).size;
 
   const priced = c => monthAppts.filter(a => (a.currency || 'ARS') === c && a.price !== '' && a.price != null && !isNaN(Number(a.price)));
   const arsAppts = priced('ARS');
@@ -1415,7 +1210,7 @@ function computeStatsForMonth(year, month0){
 }
 
 function computeAllTimeStats(){
-  const uniquePatients = new Set(appointments.map(a => a.patientId || normalizeName(a.name))).size;
+  const uniquePatients = new Set(appointments.map(a => a.name.trim().toLowerCase())).size;
   const priced = c => appointments.filter(a => (a.currency || 'ARS') === c && a.price !== '' && a.price != null && !isNaN(Number(a.price)));
   const arsTotal = priced('ARS').reduce((s,a) => s + Number(a.price), 0);
   const usdTotal = priced('USD').reduce((s,a) => s + Number(a.price), 0);
@@ -1589,13 +1384,13 @@ function renderSemana(){
       endMin = Math.max(0, Math.min(colHeight/ROW_H*60, endMin));
       const top = (startMin/60) * ROW_H;
       const height = Math.max(18, ((endMin-startMin)/60) * ROW_H - 2);
-      const color = colorForAppointment(a);
+      const color = colorForName(a.name);
       const gap = 3;
       const colWidthPct = 100 / colsInCluster;
       const leftPct = col * colWidthPct;
       const hasOverlap = colsInCluster > 1;
       const tooltipParts = [`${a.timeStart}–${a.timeEnd}`, a.name];
-      if(getPatientPhone(a)) tooltipParts.push(`Tel: ${formatPhoneDisplay(getPatientPhone(a))}`);
+      if(a.phone) tooltipParts.push(`Tel: ${formatPhoneDisplay(a.phone)}`);
       if(a.price) tooltipParts.push(`${currencySymbol(a.currency)}${formatPrice(a.price)}`);
       const tooltip = tooltipParts.join(' · ');
       blocksHtml += `
@@ -1642,217 +1437,12 @@ function handleSlotClick(e, dateStr){
   document.getElementById('fName').focus();
 }
 
-// ---------- Pestaña Pacientes ----------
-
-function formatShortDate(dateStr){
-  const d = parseLocalDate(dateStr);
-  return `${d.getDate()} ${MESES[d.getMonth()].slice(0,3)}`;
-}
-
-function computePatientStats(patientId){
-  const list = appointments.filter(a => a.patientId === patientId);
-  const t = todayStr();
-  const past = list.filter(a => a.date < t)
-    .sort((a,b) => a.date !== b.date ? (a.date < b.date ? 1 : -1) : timeToMinutesSafe(b.timeStart) - timeToMinutesSafe(a.timeStart));
-  const upcoming = list.filter(a => a.date >= t)
-    .sort((a,b) => a.date !== b.date ? (a.date < b.date ? -1 : 1) : timeToMinutesSafe(a.timeStart) - timeToMinutesSafe(b.timeStart));
-
-  let arsTotal = 0, usdTotal = 0;
-  list.forEach(a => {
-    if(a.price === '' || a.price === null) return;
-    const v = Number(a.price);
-    if(isNaN(v)) return;
-    if((a.currency || 'ARS') === 'USD') usdTotal += v; else arsTotal += v;
-  });
-
-  return { list, past, upcoming, totalSessions: list.length, arsTotal, usdTotal };
-}
-
-function countUnlinkedAppointments(){
-  return appointments.filter(a => !a.patientId).length;
-}
-
-let patientDetailId = null;
-
-function openPatientDetail(id){
-  patientDetailId = id;
-  renderPacientes();
-}
-function closePatientDetail(){
-  patientDetailId = null;
-  renderPacientes();
-}
-
-function renderPacientesList(){
-  const query = normalizeName(document.getElementById('patientSearch').value);
-  const filtered = patients
-    .filter(p => !query || normalizeName(p.name).includes(query))
-    .sort((a,b) => a.name.localeCompare(b.name, 'es'));
-
-  const unlinkedCount = countUnlinkedAppointments();
-  const migrationBanner = unlinkedCount > 0 ? `
-    <div class="status-banner setup" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-      <span>Tenés ${unlinkedCount} turno${unlinkedCount!==1?'s':''} cargado${unlinkedCount!==1?'s':''} sin paciente asociado (de antes de este cambio).</span>
-      <button class="banner-retry" onclick="startMigration()">Vincular ahora</button>
-    </div>` : '';
-
-  if(!filtered.length){
-    document.getElementById('patientsListContainer').innerHTML = migrationBanner +
-      `<div class="empty-state">${patients.length ? 'No se encontraron pacientes con ese nombre.' : 'Todavía no hay pacientes cargados.'}</div>`;
-    return;
-  }
-
-  const rows = filtered.map(p => {
-    const stats = computePatientStats(p.id);
-    const color = colorForAppointment({ patientId: p.id });
-    const nextText = stats.upcoming.length
-      ? `Próxima: ${formatShortDate(stats.upcoming[0].date)} ${stats.upcoming[0].timeStart}`
-      : 'Sin turnos próximos';
-    return `
-      <div class="patient-list-row" onclick="openPatientDetail('${p.id}')">
-        <span class="appt-dot" style="background:${color.bg}"></span>
-        <div class="patient-list-main">
-          <div class="patient-list-name">${escapeHtml(p.name)}</div>
-          <div class="patient-list-sub">${stats.totalSessions} sesión${stats.totalSessions!==1?'es':''} · ${nextText}</div>
-        </div>
-        ${p.phone ? `<div class="patient-list-phone">${escapeHtml(formatPhoneDisplay(p.phone))}</div>` : ''}
-      </div>`;
-  }).join('');
-
-  document.getElementById('patientsListContainer').innerHTML = migrationBanner + rows;
-}
-
-function renderPatientDetail(){
-  const p = getPatientById(patientDetailId);
-  if(!p){ closePatientDetail(); return; }
-  const stats = computePatientStats(p.id);
-
-  const sessionRow = (a) => `
-    <div class="patient-session-row">
-      <span class="ps-date">${formatShortDate(a.date)}</span>
-      <span class="ps-time">${a.timeStart}–${a.timeEnd}</span>
-      <span class="ps-price">${a.price ? currencySymbol(a.currency) + formatPrice(a.price) : '—'}</span>
-      <button class="icon-btn" onclick="editAppointment('${a.id}')" title="Editar">✎</button>
-    </div>`;
-
-  document.getElementById('patientsListContainer').innerHTML = `
-    <button class="banner-retry" style="margin-left:0; margin-bottom:14px;" onclick="closePatientDetail()">← Volver a pacientes</button>
-    <div class="card">
-      <h2>${escapeHtml(p.name)}</h2>
-      <div class="field">
-        <label for="patientDetailPhone">Teléfono</label>
-        <input type="tel" id="patientDetailPhone" value="${escapeHtml(p.phone)}">
-      </div>
-      <div class="field">
-        <label for="patientDetailNotes">Notas del paciente</label>
-        <textarea id="patientDetailNotes">${escapeHtml(p.notes)}</textarea>
-      </div>
-      <button class="btn-primary" onclick="savePatientDetail()">Guardar cambios</button>
-      <div class="form-msg" id="patientDetailMsg"></div>
-    </div>
-
-    <div class="stats-grid" style="margin-top:16px;">
-      ${statCardHTML('Sesiones totales', stats.totalSessions)}
-      ${statCardHTML('Facturado en $', stats.arsTotal ? '$' + formatPrice(Math.round(stats.arsTotal)) : '—')}
-      ${statCardHTML('Facturado en US$', stats.usdTotal ? 'US$' + formatPrice(Math.round(stats.usdTotal)) : '—')}
-    </div>
-
-    <div class="card" style="margin-top:18px;">
-      <h2>Próximas sesiones</h2>
-      ${stats.upcoming.length ? stats.upcoming.map(sessionRow).join('') : '<div class="empty-state">Sin turnos próximos.</div>'}
-    </div>
-
-    <div class="card" style="margin-top:18px;">
-      <h2>Historial</h2>
-      ${stats.past.length ? stats.past.map(sessionRow).join('') : '<div class="empty-state">Sin sesiones pasadas registradas.</div>'}
-    </div>`;
-}
-
-async function savePatientDetail(){
-  const p = getPatientById(patientDetailId);
-  if(!p) return;
-  const phone = document.getElementById('patientDetailPhone').value.trim();
-  const notes = document.getElementById('patientDetailNotes').value.trim();
-  const msg = document.getElementById('patientDetailMsg');
-  msg.style.color = 'var(--ink-soft)';
-  msg.textContent = 'Guardando...';
-  try{
-    await apiPost({ action:'updatePatient', patient:{ id: p.id, name: p.name, phone, notes } });
-    await loadAppointments();
-    const msgEl = document.getElementById('patientDetailMsg');
-    if(msgEl){ msgEl.style.color = 'var(--teal-deep)'; msgEl.textContent = 'Guardado.'; }
-  }catch(e){
-    msg.style.color = '#B0432E';
-    msg.textContent = 'No se pudo guardar. Intentá de nuevo.';
-  }
-}
-
-// Agrupa los turnos históricos que quedaron sin paciente (de antes de esta
-// función) por nombre normalizado, crea un paciente por grupo y enlaza cada
-// turno correspondiente. Pensado para correrse una sola vez.
-async function startMigration(){
-  const unlinked = appointments.filter(a => !a.patientId);
-  const groups = {};
-  unlinked.forEach(a => {
-    const key = normalizeName(a.name);
-    if(!key) return;
-    if(!groups[key]) groups[key] = { displayName: a.name, items: [] };
-    groups[key].items.push(a);
-  });
-
-  const keys = Object.keys(groups);
-  if(!keys.length){
-    alert('No hay turnos con nombre para vincular.');
-    return;
-  }
-
-  const summary = keys.map(k => `• ${groups[k].displayName} (${groups[k].items.length} turno${groups[k].items.length!==1?'s':''})`).join('\n');
-  const ok = confirm(`Vamos a crear ${keys.length} paciente(s) nuevo(s) a partir de tus turnos existentes:\n\n${summary}\n\n¿Confirmás?`);
-  if(!ok) return;
-
-  try{
-    for(const k of keys){
-      const group = groups[k];
-      let patient = findPatientByExactName(group.displayName);
-      if(!patient){
-        const res = await apiPost({ action:'createPatient', patient:{ name: group.displayName, phone:'', notes:'' } });
-        patient = { id: res.id, name: group.displayName, phone:'', notes:'' };
-        patients.push(patient);
-      }
-      for(const appt of group.items){
-        await apiPost({ action:'update', appointment:{
-          id: appt.id, patientId: patient.id, name: group.displayName,
-          date: appt.date, timeStart: appt.timeStart, timeEnd: appt.timeEnd,
-          price: appt.price, currency: appt.currency, notes: appt.notes
-        }});
-      }
-    }
-    alert('Listo. Los turnos quedaron vinculados a sus pacientes.');
-    await loadAppointments();
-  }catch(e){
-    alert('Algo falló durante la vinculación. Revisá tu conexión e intentá de nuevo — los turnos ya vinculados quedan guardados.');
-    await loadAppointments();
-  }
-}
-
-function renderPacientes(){
-  const searchWrap = document.getElementById('patientSearchWrap');
-  if(patientDetailId){
-    searchWrap.classList.add('hidden');
-    renderPatientDetail();
-  } else {
-    searchWrap.classList.remove('hidden');
-    renderPacientesList();
-  }
-}
-
 function render(){
   renderHoy();
   renderManana();
   renderOtroDia();
   renderSemana();
   renderEstadisticas();
-  renderPacientes();
   const d = new Date();
   document.getElementById('todayTag').textContent =
     `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]}`;
@@ -1864,7 +1454,6 @@ const VIEW_IDS = {
   manana: 'viewManana',
   otro: 'viewOtro',
   semana: 'viewSemana',
-  pacientes: 'viewPacientes',
   estadisticas: 'viewEstadisticas'
 };
 
@@ -1900,17 +1489,6 @@ document.getElementById('btnAdd').addEventListener('click', addAppointment);
 document.getElementById('btnRefresh').addEventListener('click', loadAppointments);
 document.getElementById('fDate').value = todayStr();
 populateDurationSelect();
-
-// Autocompletado de pacientes en "Nuevo turno"
-document.getElementById('fName').addEventListener('input', (e) => {
-  selectedPatientId = null; // se está tipeando algo nuevo, se resuelve de nuevo al guardar
-  showSelectedPatientPhone(null);
-  showPatientSuggestions(e.target.value);
-});
-document.getElementById('fName').addEventListener('blur', () => {
-  setTimeout(hidePatientSuggestions, 150);
-});
-document.getElementById('patientSearch').addEventListener('input', renderPacientesList);
 
 // Vuelve a pedir los datos a la planilla al volver a la pestaña, y cada 60s,
 // para que los cambios hechos desde otro dispositivo aparezcan sin recargar a mano.
