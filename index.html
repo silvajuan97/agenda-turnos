@@ -236,6 +236,33 @@ body{
 }
 .btn-primary:hover{background:var(--teal-deep);}
 .btn-primary:active{transform:translateY(1px);}
+
+.form-type-toggle{
+  display:flex;
+  gap:4px;
+  background:var(--paper);
+  border-radius:7px;
+  padding:3px;
+  margin-bottom:16px;
+}
+.ftt-btn{
+  flex:1;
+  background:none;
+  border:none;
+  border-radius:5px;
+  padding:7px 6px;
+  font-family:'Inter',sans-serif;
+  font-size:12px;
+  font-weight:600;
+  color:var(--ink-soft);
+  cursor:pointer;
+}
+.ftt-btn.active{
+  background:var(--paper-raised);
+  color:var(--ink);
+  box-shadow:0 1px 3px rgba(0,0,0,.08);
+}
+
 .form-msg{
   font-size:12.5px;
   color:var(--teal-deep);
@@ -369,6 +396,21 @@ body{
   border-radius:50%;
   flex-shrink:0;
   display:inline-block;
+}
+.appt-row.appt-row-block{
+  background-image:repeating-linear-gradient(135deg, rgba(0,0,0,.025) 0 8px, transparent 8px 16px);
+}
+.appt-row-block .appt-name{font-style:italic; color:var(--ink-soft);}
+.block-tag{
+  font-size:10.5px;
+  font-weight:700;
+  font-style:normal;
+  color:var(--ink-soft);
+  background:var(--paper);
+  padding:2px 7px;
+  border-radius:4px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
 }
 .appt-warn{
   font-size:11px;
@@ -539,6 +581,10 @@ body{
 }
 .tt-appt.is-today{box-shadow:inset 0 0 0 2px rgba(0,0,0,.35);}
 .tt-appt.tt-overlap{outline:2px dashed #B0432E; outline-offset:1px;}
+.tt-appt.tt-block{
+  background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.18) 0 6px, transparent 6px 12px);
+  font-style:italic;
+}
 .tt-appt:hover{filter:brightness(1.08);}
 .tt-appt-time{
   font-family:'DM Mono', monospace;
@@ -748,8 +794,12 @@ body{
     <div>
       <div class="card">
         <h2>Nuevo turno</h2>
+        <div class="form-type-toggle">
+          <button type="button" class="ftt-btn active" id="fTypeSession" onclick="setFormType('session')">Turno con paciente</button>
+          <button type="button" class="ftt-btn" id="fTypeBlock" onclick="setFormType('block')">Horario ocupado</button>
+        </div>
         <div class="field" style="position:relative;">
-          <label for="fName">Paciente</label>
+          <label for="fName" id="fNameLabel">Paciente</label>
           <input type="text" id="fName" placeholder="Nombre y apellido" autocomplete="off">
           <div id="patientSuggestions" class="patient-suggestions hidden"></div>
           <div id="patientPhoneInfo" class="patient-phone-info hidden"></div>
@@ -768,7 +818,7 @@ body{
             <select id="fDuration"></select>
           </div>
         </div>
-        <div class="field">
+        <div class="field" id="priceField">
           <label for="fPrice">Valor consulta</label>
           <div class="price-group">
             <select id="fCurrency">
@@ -779,7 +829,7 @@ body{
           </div>
         </div>
         <div class="field">
-          <label for="fNotes">Notas</label>
+          <label for="fNotes" id="fNotesLabel">Notas</label>
           <textarea id="fNotes" placeholder="Ej: primera sesión, modalidad online..."></textarea>
         </div>
         <button class="btn-primary" id="btnAdd">Agregar turno</button>
@@ -844,6 +894,7 @@ let patients = [];
 let weekOffset = 0; // 0 = current week
 let editingId = null;
 let selectedPatientId = null; // paciente enlazado al turno que se está cargando/editando
+let formType = 'session'; // 'session' (turno con paciente) | 'block' (horario ocupado)
 
 const DIAS = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
 const DIAS_CORTOS = ['dom','lun','mar','mié','jue','vie','sáb'];
@@ -862,6 +913,10 @@ const PALETTE = [
   { bg:'#B15A6C', line:'#853F4C' }, // rose
 ];
 
+// Color fijo y neutro para "horario ocupado" — deliberadamente fuera de
+// la paleta de pacientes, para que nunca se confunda con una sesión.
+const BLOCK_COLOR = { bg:'#6B6558', line:'#4A4639' };
+
 function hashStr(str){
   let h = 0;
   for(let i=0; i<str.length; i++){ h = (h*31 + str.charCodeAt(i)) >>> 0; }
@@ -877,6 +932,7 @@ function normalizeName(str){
 }
 
 function colorForAppointment(a){
+  if(a && a.type === 'block') return BLOCK_COLOR;
   const key = (a && a.patientId) ? a.patientId : normalizeName(a && a.name);
   const idx = hashStr(key) % PALETTE.length;
   return PALETTE[idx];
@@ -998,7 +1054,8 @@ function normalizeAppointment(a){
     timeEnd: toText(a.timeEnd),
     price: toText(a.price),
     currency: toText(a.currency) || 'ARS',
-    notes: toText(a.notes)
+    notes: toText(a.notes),
+    type: toText(a.type) || 'session'
   };
 }
 
@@ -1084,13 +1141,20 @@ function setSyncing(isSyncing){
   }
 }
 
+let isLoadInProgress = false;
+let isMigrating = false;
+
 async function loadAppointments(){
+  if(isLoadInProgress || isMigrating) return; // evita llamadas superpuestas (auto-refresh, focus, etc.)
+  isLoadInProgress = true;
+
   if(!isBackendConfigured()){
     hideInitialLoading();
     showBanner('setup', 'Todavía no conectaste la planilla: pegá la URL de tu Google Apps Script en <code>AGENDA_SCRIPT_URL</code>, dentro del archivo HTML, y volvé a abrir la página.');
     appointments = [];
     patients = [];
     render();
+    isLoadInProgress = false;
     return;
   }
 
@@ -1110,12 +1174,16 @@ async function loadAppointments(){
     if(retryBtn) retryBtn.addEventListener('click', loadAppointments);
     setSyncing(false);
     hideInitialLoading();
+    isLoadInProgress = false;
   }
 }
 
 function editAppointment(id){
   const a = appointments.find(x => x.id === id);
   if(!a) return;
+
+  setFormType(a.type === 'block' ? 'block' : 'session');
+
   document.getElementById('fName').value = a.name;
   document.getElementById('fDate').value = a.date;
   document.getElementById('fStart').value = a.timeStart;
@@ -1126,16 +1194,40 @@ function editAppointment(id){
   document.getElementById('fDuration').value = duration;
 
   document.getElementById('fNotes').value = a.notes || '';
-  document.getElementById('fPrice').value = a.price || '';
-  document.getElementById('fCurrency').value = a.currency || 'ARS';
 
-  selectedPatientId = a.patientId || null;
+  if(a.type === 'block'){
+    selectedPatientId = null;
+  } else {
+    document.getElementById('fPrice').value = a.price || '';
+    document.getElementById('fCurrency').value = a.currency || 'ARS';
+    selectedPatientId = a.patientId || null;
+    showSelectedPatientPhone(selectedPatientId ? getPatientById(selectedPatientId) : null);
+  }
   hidePatientSuggestions();
-  showSelectedPatientPhone(selectedPatientId ? getPatientById(selectedPatientId) : null);
 
   editingId = id;
   document.getElementById('btnAdd').textContent = 'Guardar cambios';
   window.scrollTo({top:0, behavior:'smooth'});
+}
+
+// ---------- Toggle turno con paciente / horario ocupado ----------
+
+function setFormType(type){
+  formType = type;
+  document.getElementById('fTypeSession').classList.toggle('active', type === 'session');
+  document.getElementById('fTypeBlock').classList.toggle('active', type === 'block');
+  document.getElementById('fNameLabel').textContent = type === 'block' ? 'Motivo' : 'Paciente';
+  document.getElementById('fName').placeholder = type === 'block' ? 'Ej: Reunión, trámite, almuerzo...' : 'Nombre y apellido';
+  document.getElementById('fNotesLabel').textContent = type === 'block' ? 'Detalle (opcional)' : 'Notas';
+  document.getElementById('priceField').classList.toggle('hidden', type === 'block');
+
+  selectedPatientId = null;
+  hidePatientSuggestions();
+  showSelectedPatientPhone(null);
+
+  document.getElementById('btnAdd').textContent = editingId
+    ? 'Guardar cambios'
+    : (type === 'block' ? 'Bloquear horario' : 'Agregar turno');
 }
 
 // ---------- Autocompletado de pacientes en "Nuevo turno" ----------
@@ -1246,20 +1338,22 @@ function formatPrice(value){
 }
 
 function apptRowHTML(a, isToday){
+  const isBlock = a.type === 'block';
   const color = colorForAppointment(a);
-  const phone = getPatientPhone(a);
+  const phone = isBlock ? '' : getPatientPhone(a);
   const metaParts = [];
   if(phone) metaParts.push(`<span class="appt-meta-item">📞 ${escapeHtml(formatPhoneDisplay(phone))}</span>`);
-  if(a.price) metaParts.push(`<span class="appt-meta-item">${currencySymbol(a.currency)}${formatPrice(a.price)}</span>`);
+  if(!isBlock && a.price) metaParts.push(`<span class="appt-meta-item">${currencySymbol(a.currency)}${formatPrice(a.price)}</span>`);
   if(a.notes) metaParts.push(`<span class="appt-meta-item appt-meta-notes">${escapeHtml(a.notes)}</span>`);
 
   return `
-    <div class="appt-row ${isToday ? 'is-today' : ''}" style="border-left-color:${color.bg}">
+    <div class="appt-row ${isToday ? 'is-today' : ''} ${isBlock ? 'appt-row-block' : ''}" style="border-left-color:${color.bg}">
       <div class="appt-row-top">
         <div class="appt-time">${a.timeStart}–${a.timeEnd}</div>
         <div class="appt-name">
-          <span class="appt-dot" style="background:${color.bg}"></span>
+          ${isBlock ? '<span title="Horario ocupado">🔒</span>' : `<span class="appt-dot" style="background:${color.bg}"></span>`}
           ${escapeHtml(a.name)}
+          ${isBlock ? '<span class="block-tag">Bloqueado</span>' : ''}
           ${a._overlap ? '<span class="appt-warn">⚠ superpuesto</span>' : ''}
         </div>
         <div class="appt-actions">
@@ -1277,17 +1371,20 @@ async function addAppointment(){
     return;
   }
 
+  const isBlock = formType === 'block';
   const name = document.getElementById('fName').value.trim();
   const date = document.getElementById('fDate').value;
   const timeStart = document.getElementById('fStart').value;
   const duration = parseInt(document.getElementById('fDuration').value, 10);
-  const price = document.getElementById('fPrice').value.trim();
-  const currency = document.getElementById('fCurrency').value;
+  const price = isBlock ? '' : document.getElementById('fPrice').value.trim();
+  const currency = isBlock ? '' : document.getElementById('fCurrency').value;
   const notes = document.getElementById('fNotes').value.trim();
   const msg = document.getElementById('formMsg');
 
   if(!name || !date || !timeStart || !duration){
-    msg.textContent = 'Completá nombre, día, hora de inicio y duración.';
+    msg.textContent = isBlock
+      ? 'Completá motivo, día, hora de inicio y duración.'
+      : 'Completá nombre, día, hora de inicio y duración.';
     msg.style.color = '#B0432E';
     return;
   }
@@ -1302,20 +1399,23 @@ async function addAppointment(){
   msg.textContent = 'Guardando...';
 
   try{
-    const patientId = await resolvePatientForSave(name);
-    if(patientId === null){
-      // el usuario canceló la creación del paciente nuevo: no guardamos nada
-      msg.textContent = '';
-      btn.disabled = false;
-      return;
+    let patientId = '';
+    if(!isBlock){
+      patientId = await resolvePatientForSave(name);
+      if(patientId === null){
+        // el usuario canceló la creación del paciente nuevo: no guardamos nada
+        msg.textContent = '';
+        btn.disabled = false;
+        return;
+      }
     }
 
     if(wasEditing){
-      await apiPost({ action:'update', appointment:{ id: wasEditing, patientId, name, date, timeStart, timeEnd, price, currency, notes } });
+      await apiPost({ action:'update', appointment:{ id: wasEditing, patientId, name, date, timeStart, timeEnd, price, currency, notes, type: formType } });
       editingId = null;
-      btn.textContent = 'Agregar turno';
+      btn.textContent = isBlock ? 'Bloquear horario' : 'Agregar turno';
     } else {
-      await apiPost({ action:'create', appointment:{ patientId, name, date, timeStart, timeEnd, price, currency, notes } });
+      await apiPost({ action:'create', appointment:{ patientId, name, date, timeStart, timeEnd, price, currency, notes, type: formType } });
     }
     await loadAppointments();
 
@@ -1331,10 +1431,10 @@ async function addAppointment(){
     if(overlaps.length){
       const names = overlaps.map(o => `${o.name} (${o.timeStart}–${o.timeEnd})`).join(', ');
       msg.style.color = '#B0432E';
-      msg.textContent = `Turno guardado, pero se superpone con: ${names}.`;
+      msg.textContent = `${isBlock ? 'Horario bloqueado' : 'Turno guardado'}, pero se superpone con: ${names}.`;
     } else {
       msg.style.color = 'var(--teal-deep)';
-      msg.textContent = 'Turno guardado.';
+      msg.textContent = isBlock ? 'Horario bloqueado.' : 'Turno guardado.';
       setTimeout(()=>{ msg.textContent=''; }, 2200);
     }
   }catch(e){
@@ -1389,6 +1489,7 @@ function getStatsMonthDate(){
 
 function computeStatsForMonth(year, month0){
   const monthAppts = appointments.filter(a => {
+    if(a.type === 'block') return false; // los bloqueos de horario no son sesiones de pacientes
     const d = parseLocalDate(a.date);
     return d.getFullYear() === year && d.getMonth() === month0;
   });
@@ -1417,11 +1518,12 @@ function computeStatsForMonth(year, month0){
 }
 
 function computeAllTimeStats(){
-  const uniquePatients = new Set(appointments.map(a => a.patientId || normalizeName(a.name))).size;
-  const priced = c => appointments.filter(a => (a.currency || 'ARS') === c && a.price !== '' && a.price != null && !isNaN(Number(a.price)));
+  const realAppts = appointments.filter(a => a.type !== 'block'); // los bloqueos de horario no son sesiones de pacientes
+  const uniquePatients = new Set(realAppts.map(a => a.patientId || normalizeName(a.name))).size;
+  const priced = c => realAppts.filter(a => (a.currency || 'ARS') === c && a.price !== '' && a.price != null && !isNaN(Number(a.price)));
   const arsTotal = priced('ARS').reduce((s,a) => s + Number(a.price), 0);
   const usdTotal = priced('USD').reduce((s,a) => s + Number(a.price), 0);
-  return { totalTurnos: appointments.length, uniquePatients, arsTotal, usdTotal };
+  return { totalTurnos: realAppts.length, uniquePatients, arsTotal, usdTotal };
 }
 
 function statCardHTML(label, value, accent){
@@ -1591,17 +1693,18 @@ function renderSemana(){
       endMin = Math.max(0, Math.min(colHeight/ROW_H*60, endMin));
       const top = (startMin/60) * ROW_H;
       const height = Math.max(18, ((endMin-startMin)/60) * ROW_H - 2);
+      const isBlockAppt = a.type === 'block';
       const color = colorForAppointment(a);
       const gap = 3;
       const colWidthPct = 100 / colsInCluster;
       const leftPct = col * colWidthPct;
       const hasOverlap = colsInCluster > 1;
       const tooltipParts = [`${a.timeStart}–${a.timeEnd}`, a.name];
-      if(getPatientPhone(a)) tooltipParts.push(`Tel: ${formatPhoneDisplay(getPatientPhone(a))}`);
-      if(a.price) tooltipParts.push(`${currencySymbol(a.currency)}${formatPrice(a.price)}`);
+      if(!isBlockAppt && getPatientPhone(a)) tooltipParts.push(`Tel: ${formatPhoneDisplay(getPatientPhone(a))}`);
+      if(!isBlockAppt && a.price) tooltipParts.push(`${currencySymbol(a.currency)}${formatPrice(a.price)}`);
       const tooltip = tooltipParts.join(' · ');
       blocksHtml += `
-        <div class="tt-appt ${isToday ? 'is-today' : ''} ${hasOverlap ? 'tt-overlap' : ''}"
+        <div class="tt-appt ${isToday ? 'is-today' : ''} ${hasOverlap ? 'tt-overlap' : ''} ${isBlockAppt ? 'tt-block' : ''}"
              style="top:${top}px;height:${height}px;left:calc(${leftPct}% + ${gap}px);width:calc(${colWidthPct}% - ${gap*2}px);background:${color.bg};border-left-color:${color.line}"
              title="${escapeHtml(tooltip)}"
              onclick="event.stopPropagation(); editAppointment('${a.id}')">
@@ -1671,7 +1774,7 @@ function computePatientStats(patientId){
 }
 
 function countUnlinkedAppointments(){
-  return appointments.filter(a => !a.patientId).length;
+  return appointments.filter(a => !a.patientId && a.type !== 'block').length;
 }
 
 let patientDetailId = null;
@@ -1793,13 +1896,13 @@ async function savePatientDetail(){
 // función) por nombre normalizado, crea un paciente por grupo y enlaza cada
 // turno correspondiente. Pensado para correrse una sola vez.
 async function startMigration(){
-  const unlinked = appointments.filter(a => !a.patientId);
+  const unlinked = appointments.filter(a => !a.patientId && a.type !== 'block');
   const groups = {};
   unlinked.forEach(a => {
     const key = normalizeName(a.name);
     if(!key) return;
-    if(!groups[key]) groups[key] = { displayName: a.name, items: [] };
-    groups[key].items.push(a);
+    if(!groups[key]) groups[key] = { displayName: a.name, count: 0 };
+    groups[key].count++;
   });
 
   const keys = Object.keys(groups);
@@ -1808,31 +1911,24 @@ async function startMigration(){
     return;
   }
 
-  const summary = keys.map(k => `• ${groups[k].displayName} (${groups[k].items.length} turno${groups[k].items.length!==1?'s':''})`).join('\n');
-  const ok = confirm(`Vamos a crear ${keys.length} paciente(s) nuevo(s) a partir de tus turnos existentes:\n\n${summary}\n\n¿Confirmás?`);
+  const summary = keys.map(k => `• ${groups[k].displayName} (${groups[k].count} turno${groups[k].count!==1?'s':''})`).join('\n');
+  const ok = confirm(`Vamos a crear hasta ${keys.length} paciente(s) nuevo(s) a partir de tus turnos existentes:\n\n${summary}\n\n¿Confirmás?`);
   if(!ok) return;
 
+  isMigrating = true; // pausa la sincronización automática mientras migra
+  showBanner('setup', 'Vinculando turnos con sus pacientes... no cierres ni recargues la página, puede tardar unos segundos.');
+
   try{
-    for(const k of keys){
-      const group = groups[k];
-      let patient = findPatientByExactName(group.displayName);
-      if(!patient){
-        const res = await apiPost({ action:'createPatient', patient:{ name: group.displayName, phone:'', notes:'' } });
-        patient = { id: res.id, name: group.displayName, phone:'', notes:'' };
-        patients.push(patient);
-      }
-      for(const appt of group.items){
-        await apiPost({ action:'update', appointment:{
-          id: appt.id, patientId: patient.id, name: group.displayName,
-          date: appt.date, timeStart: appt.timeStart, timeEnd: appt.timeEnd,
-          price: appt.price, currency: appt.currency, notes: appt.notes
-        }});
-      }
+    const res = await apiPost({ action:'migrate' });
+    if(res && res.success){
+      alert(`Listo: se crearon ${res.patientsCreated} paciente(s) nuevo(s) y se vincularon ${res.appointmentsLinked} turno(s).`);
+    } else {
+      alert('No se pudo completar la vinculación: ' + (res && res.error ? res.error : 'error desconocido') + '. Podés volver a tocar "Vincular ahora".');
     }
-    alert('Listo. Los turnos quedaron vinculados a sus pacientes.');
-    await loadAppointments();
   }catch(e){
-    alert('Algo falló durante la vinculación. Revisá tu conexión e intentá de nuevo — los turnos ya vinculados quedan guardados.');
+    alert('No se pudo conectar para migrar. Revisá tu conexión e intentá de nuevo tocando "Vincular ahora".');
+  }finally{
+    isMigrating = false;
     await loadAppointments();
   }
 }
@@ -1905,6 +2001,7 @@ populateDurationSelect();
 
 // Autocompletado de pacientes en "Nuevo turno"
 document.getElementById('fName').addEventListener('input', (e) => {
+  if(formType !== 'session') return; // en modo "horario ocupado" no hay autocompletado de pacientes
   selectedPatientId = null; // se está tipeando algo nuevo, se resuelve de nuevo al guardar
   showSelectedPatientPhone(null);
   showPatientSuggestions(e.target.value);
