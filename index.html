@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agenda de turnos</title>
+<title id="pageTitle">Agenda de turnos</title>
 <script src="https://cdn.jsdelivr.net/npm/libphonenumber-js/bundle/libphonenumber-js.min.js"></script>
+<script src="config.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
@@ -772,7 +773,7 @@ body{
 
 <div class="app">
   <div class="masthead">
-    <h1>Agenda de turnos</h1>
+    <h1 id="pageHeading">Agenda de turnos</h1>
     <div style="display:flex; align-items:center; gap:12px;">
       <span class="today-tag" id="todayTag"></span>
       <span id="syncIndicator" class="sync-indicator hidden">
@@ -813,9 +814,13 @@ body{
             <label for="fStart">Hora de inicio</label>
             <input type="time" id="fStart">
           </div>
-          <div class="field">
+          <div class="field" id="durationField">
             <label for="fDuration">Duración</label>
             <select id="fDuration"></select>
+          </div>
+          <div class="field hidden" id="blockEndField">
+            <label for="fBlockEnd">Hora de fin</label>
+            <input type="time" id="fBlockEnd">
           </div>
         </div>
         <div class="field" id="priceField">
@@ -1004,7 +1009,7 @@ function parseLocalDate(str){
   return new Date(y, m-1, d);
 }
 
-const DEFAULT_DURATION = 40;
+// DEFAULT_DURATION se define en config.js
 
 function timeToMinutes(timeStr){
   const [h,m] = timeStr.split(':').map(Number);
@@ -1029,9 +1034,8 @@ function populateDurationSelect(){
 }
 
 // ---------- Backend config ----------
-// Pegá acá la URL que te da Google Apps Script al implementar como "Aplicación web".
-// Tiene esta forma: https://script.google.com/macros/s/AKfycb.../exec
-const AGENDA_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjOlYQbqy-dv2QuUSufE_P_eTkpG4JSJjr-XGVx7R04auHY3l0GhOLxlSwOt-28TjmSA/exec';
+// AGENDA_SCRIPT_URL se define en config.js (archivo aparte, que no se
+// pisa cuando subís una versión nueva de este HTML).
 
 function isBackendConfigured(){
   return typeof AGENDA_SCRIPT_URL === 'string' && AGENDA_SCRIPT_URL.indexOf('https://script.google.com') === 0;
@@ -1150,7 +1154,7 @@ async function loadAppointments(){
 
   if(!isBackendConfigured()){
     hideInitialLoading();
-    showBanner('setup', 'Todavía no conectaste la planilla: pegá la URL de tu Google Apps Script en <code>AGENDA_SCRIPT_URL</code>, dentro del archivo HTML, y volvé a abrir la página.');
+    showBanner('setup', 'Todavía no conectaste la planilla: pegá la URL de tu Google Apps Script en <code>config.js</code> y volvé a abrir la página.');
     appointments = [];
     patients = [];
     render();
@@ -1188,10 +1192,14 @@ function editAppointment(id){
   document.getElementById('fDate').value = a.date;
   document.getElementById('fStart').value = a.timeStart;
 
-  let duration = timeToMinutes(a.timeEnd) - timeToMinutes(a.timeStart);
-  if(duration <= 0) duration = DEFAULT_DURATION;
-  duration = Math.max(5, Math.min(60, Math.round(duration/5)*5));
-  document.getElementById('fDuration').value = duration;
+  if(a.type === 'block'){
+    document.getElementById('fBlockEnd').value = a.timeEnd;
+  } else {
+    let duration = timeToMinutes(a.timeEnd) - timeToMinutes(a.timeStart);
+    if(duration <= 0) duration = DEFAULT_DURATION;
+    duration = Math.max(5, Math.min(60, Math.round(duration/5)*5));
+    document.getElementById('fDuration').value = duration;
+  }
 
   document.getElementById('fNotes').value = a.notes || '';
 
@@ -1220,6 +1228,18 @@ function setFormType(type){
   document.getElementById('fName').placeholder = type === 'block' ? 'Ej: Reunión, trámite, almuerzo...' : 'Nombre y apellido';
   document.getElementById('fNotesLabel').textContent = type === 'block' ? 'Detalle (opcional)' : 'Notas';
   document.getElementById('priceField').classList.toggle('hidden', type === 'block');
+  document.getElementById('durationField').classList.toggle('hidden', type === 'block');
+  document.getElementById('blockEndField').classList.toggle('hidden', type !== 'block');
+
+  // El nombre/motivo, el precio y la duración/hora de fin significan algo
+  // distinto en cada tipo, así que se vacían al cambiar entre uno y otro —
+  // para que no quede un dato del tipo anterior guardado en un campo que
+  // pasó a estar oculto.
+  document.getElementById('fName').value = '';
+  document.getElementById('fPrice').value = '';
+  document.getElementById('fCurrency').value = 'ARS';
+  document.getElementById('fDuration').value = DEFAULT_DURATION;
+  document.getElementById('fBlockEnd').value = '';
 
   selectedPatientId = null;
   hidePatientSuggestions();
@@ -1367,7 +1387,7 @@ function apptRowHTML(a, isToday){
 
 async function addAppointment(){
   if(!isBackendConfigured()){
-    showBanner('setup', 'Todavía no conectaste la planilla: pegá la URL de tu Google Apps Script en <code>AGENDA_SCRIPT_URL</code>, dentro del archivo HTML, y volvé a abrir la página.');
+    showBanner('setup', 'Todavía no conectaste la planilla: pegá la URL de tu Google Apps Script en <code>config.js</code> y volvé a abrir la página.');
     return;
   }
 
@@ -1376,20 +1396,27 @@ async function addAppointment(){
   const date = document.getElementById('fDate').value;
   const timeStart = document.getElementById('fStart').value;
   const duration = parseInt(document.getElementById('fDuration').value, 10);
+  const blockEnd = document.getElementById('fBlockEnd').value;
   const price = isBlock ? '' : document.getElementById('fPrice').value.trim();
   const currency = isBlock ? '' : document.getElementById('fCurrency').value;
   const notes = document.getElementById('fNotes').value.trim();
   const msg = document.getElementById('formMsg');
 
-  if(!name || !date || !timeStart || !duration){
+  if(!name || !date || !timeStart || (isBlock ? !blockEnd : !duration)){
     msg.textContent = isBlock
-      ? 'Completá motivo, día, hora de inicio y duración.'
+      ? 'Completá motivo, día, hora de inicio y hora de fin.'
       : 'Completá nombre, día, hora de inicio y duración.';
     msg.style.color = '#B0432E';
     return;
   }
 
-  const timeEnd = addMinutesToTime(timeStart, duration);
+  if(isBlock && blockEnd <= timeStart){
+    msg.textContent = 'La hora de fin tiene que ser posterior a la de inicio.';
+    msg.style.color = '#B0432E';
+    return;
+  }
+
+  const timeEnd = isBlock ? blockEnd : addMinutesToTime(timeStart, duration);
   const overlaps = findOverlaps(date, timeStart, timeEnd, editingId);
   const btn = document.getElementById('btnAdd');
   const wasEditing = editingId;
@@ -1424,6 +1451,7 @@ async function addAppointment(){
     document.getElementById('fCurrency').value = 'ARS';
     document.getElementById('fNotes').value = '';
     document.getElementById('fDuration').value = DEFAULT_DURATION;
+    document.getElementById('fBlockEnd').value = '';
     selectedPatientId = null;
     hidePatientSuggestions();
     showSelectedPatientPhone(null);
@@ -1607,8 +1635,7 @@ function getMondayOfWeek(offset){
   return monday;
 }
 
-const START_HOUR = 8;
-const END_HOUR = 21; // grid covers 08:00–21:00
+// START_HOUR y END_HOUR se definen en config.js
 const ROW_H = 52; // px per hour, must match CSS visual rhythm
 
 function timeToMinutesFromStart(timeStr){
@@ -1740,9 +1767,13 @@ function handleSlotClick(e, dateStr){
 
   document.getElementById('fDate').value = dateStr;
   document.getElementById('fStart').value = startStr;
-  document.getElementById('fDuration').value = DEFAULT_DURATION;
+  if(formType === 'block'){
+    document.getElementById('fBlockEnd').value = '';
+  } else {
+    document.getElementById('fDuration').value = DEFAULT_DURATION;
+  }
   editingId = null;
-  document.getElementById('btnAdd').textContent = 'Agregar turno';
+  document.getElementById('btnAdd').textContent = formType === 'block' ? 'Bloquear horario' : 'Agregar turno';
   window.scrollTo({top:0, behavior:'smooth'});
   document.getElementById('fName').focus();
 }
@@ -2011,10 +2042,17 @@ document.getElementById('fName').addEventListener('blur', () => {
 });
 document.getElementById('patientSearch').addEventListener('input', renderPacientesList);
 
-// Vuelve a pedir los datos a la planilla al volver a la pestaña, y cada 60s,
-// para que los cambios hechos desde otro dispositivo aparezcan sin recargar a mano.
+// Título configurable desde config.js
+if(typeof APP_TITLE === 'string' && APP_TITLE){
+  document.getElementById('pageTitle').textContent = APP_TITLE;
+  document.getElementById('pageHeading').textContent = APP_TITLE;
+}
+
+// Vuelve a pedir los datos a la planilla al volver a la pestaña, y cada
+// AUTO_REFRESH_MS (ver config.js), para que los cambios hechos desde otro
+// dispositivo aparezcan sin recargar a mano.
 window.addEventListener('focus', loadAppointments);
-setInterval(loadAppointments, 60000);
+setInterval(loadAppointments, (typeof AUTO_REFRESH_MS === 'number' ? AUTO_REFRESH_MS : 60000));
 
 loadAppointments();
 </script>
